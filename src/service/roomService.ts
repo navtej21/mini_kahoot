@@ -1,9 +1,13 @@
-import { randomBytes, randomInt } from "node:crypto";
-import type { Room } from "../types.js";
+import { randomBytes, randomInt, randomUUID } from "node:crypto";
+import type { Player, Question, Room } from "../types.js";
 import type { RoomRepo } from "../repo/roomRepo.js";
 import { AppError } from "../error.js";
+import { QuestionInput } from "../schemas.js";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+const MAX_QUESTIONS = 20;
+const MAX_PLAYERS = 100;
 
 export class RoomService {
   constructor(private repo: RoomRepo) {}
@@ -38,13 +42,13 @@ export class RoomService {
     }
   }
 
- createRoom(title: string): Room {
+  createRoom(title: string): Room {
     const now = Date.now();
     const room: Room = {
       code: this.generateCode(),
       title,
-      hostToken: randomBytes(24).toString('hex'),
-      status: 'lobby',
+      hostToken: randomBytes(24).toString("hex"),
+      status: "lobby",
       questions: [],
       currentIndex: 0,
       players: new Map(),
@@ -53,5 +57,74 @@ export class RoomService {
     };
     this.repo.save(room);
     return room;
+  }
+
+  // now we will write the 2 functions 1 . where the host is adding the question and 2. participants joining the lobby
+
+  addQuestions(
+    code: string,
+    token: string | undefined,
+    inputs: QuestionInput[],
+  ): number {
+    const room = this.get(code);
+    this.assertHost(room, token);
+
+    if (room.status !== "lobby") {
+      throw new AppError(
+        409,
+        "GAME_ALREADY_STARTED",
+        "Cannot add questions after the game started",
+      );
+    }
+    if (room.questions.length + inputs.length > MAX_QUESTIONS) {
+      throw new AppError(
+        409,
+        "TOO_MANY_QUESTIONS",
+        `A room holds at most ${MAX_QUESTIONS} questions`,
+      );
+    }
+
+    const added: Question[] = inputs.map((q) => ({ id: randomUUID(), ...q }));
+    room.questions.push(...added);
+    room.lastActivityAt = Date.now();
+    this.repo.save(room);
+    return room.questions.length;
+  }
+
+  join(code: string, nickname: string): { room: Room; player: Player } {
+    const room = this.get(code);
+
+    if (room.status !== "lobby") {
+      throw new AppError(
+        409,
+        "GAME_ALREADY_STARTED",
+        "This game has already started",
+      );
+    }
+    if (room.players.size >= MAX_PLAYERS) {
+      throw new AppError(409, "ROOM_FULL", "This room is full");
+    }
+    const taken = [...room.players.values()].some(
+      (p) => p.nickname.toLowerCase() === nickname.toLowerCase(),
+    );
+    if (taken) {
+      throw new AppError(
+        409,
+        "NICKNAME_TAKEN",
+        "That nickname is already used in this room",
+      );
+    }
+
+    const player: Player = {
+      id: randomUUID(),
+      token: randomBytes(24).toString("hex"),
+      nickname,
+      score: 0,
+      connected: false,
+    };
+    room.players.set(player.id, player);
+    room.lastActivityAt = Date.now();
+    this.repo.save(room);
+    return { room, player };
   }
 }

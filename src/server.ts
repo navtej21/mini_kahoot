@@ -1,15 +1,10 @@
 import  express  from "express";
+import { createApp } from "./app.js";
 
 
-const app=express();
+const app=createApp();
 
 
-app.get("/health",(req,res)=>{
-    res.json({
-        status:res.status,
-        message:"success"
-    })
-});
 
 app.listen(3000,()=>{
     console.log("hello world");

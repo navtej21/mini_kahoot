@@ -16,6 +16,8 @@ export const questionInput = z
     path: ['correctIndex'],
   });
 
+  
+
 export const addQuestionsBody = z.object({
   questions: z.array(questionInput).min(1).max(20),
 });
