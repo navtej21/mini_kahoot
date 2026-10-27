@@ -3,14 +3,56 @@ import type { Player, Question, Room } from "../types.js";
 import type { RoomRepo } from "../repo/roomRepo.js";
 import { AppError } from "../error.js";
 import { QuestionInput } from "../schemas.js";
+import { assertTransition } from "../transitions.js";
+import { RoomBus } from "../sse/roombus.js";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
 const MAX_QUESTIONS = 20;
 const MAX_PLAYERS = 100;
+const bus=new RoomBus();
 
 export class RoomService {
-  constructor(private repo: RoomRepo) {}
+  constructor(private repo: RoomRepo) {
+    this.bus=bus;
+
+    
+  }
+
+  authenticateMember(
+    code: string,
+    token: string | undefined,
+  ): { room: Room; player?: Player } {
+    const room = this.get(code);
+
+    if (!token) {
+      throw new AppError(401, "MISSING_TOKEN", "Token required");
+    }
+
+    if (token === room.hostToken) {
+      return {
+        room,
+      };
+    }
+
+    for (const player of room.players.values()) {
+      if (player.token === token) {
+        return {
+          room,
+          player,
+        };
+      }
+    }
+    throw new AppError(
+      403,
+      "INVALID_TOKEN",
+      "Token does not belong to this room",
+    );
+  }
+
+   setConnected(room: Room, player: Player, connected: boolean): void {
+    player.connected = connected;
+    this.repo.save(room);
+  }
 
   private generateCode(): string {
     for (let i = 0; i < 10; i++) {
@@ -126,5 +168,34 @@ export class RoomService {
     room.lastActivityAt = Date.now();
     this.repo.save(room);
     return { room, player };
+  }
+
+
+  startGame(code:string,token:string|undefined):Room{
+
+    const room = this.get(code);
+    this.assertHost(room, token);
+
+    if (room.status !== 'lobby') {
+      throw new AppError(409, 'GAME_ALREADY_STARTED', 'This game has already started');
+    }
+    if (room.questions.length === 0) {
+      throw new AppError(409, 'NO_QUESTIONS', 'Add at least one question first');
+    }
+    if (room.players.size === 0) {
+      throw new AppError(409, 'NO_PLAYERS', 'At least one player must join first');
+    }
+
+
+    assertTransition(room.status, 'question');
+    room.status = 'question';
+    room.currentIndex = 0;
+    room.lastActivityAt = Date.now();
+    this.repo.save(room);
+
+
+    
+
+    return room;
   }
 }
